@@ -146,3 +146,41 @@ Cada constante de `TipoProducto` implementa `recargoEnvio(double)` y `etiqueta(S
 | Tras eliminar el switch (Paso 4) | 19 | `Tests run: 19, Failures: 0, Errors: 0, Skipped: 0` · BUILD SUCCESS |
 
 Desglose: 10 de `InventarioServiceTest`, 4 de `ClasificadorProductoTest`, 4 de `EtiquetadoProductoTest` y 1 de `RefactoringU11ApplicationTests`.
+
+---
+
+# Parte 2: diagnóstico y resolución del acoplamiento entre paquetes
+
+## Diagnóstico: ciclo `inventario` ↔ `reportes`
+
+Al integrar `reportes.ReporteBajoStockService`, `InventarioService` empezó a importar `ReporteBajoStockService` para avisarle del bajo stock, y `ReporteBajoStockService` ya importaba `InventarioService` para recorrer los productos bajo el mínimo. El proyecto compila y todas las pruebas de negocio siguen en verde, pero los paquetes quedan con un ciclo:
+
+```mermaid
+flowchart LR
+  inventario["inventario<br/>InventarioService"] -- "importa ReporteBajoStockService<br/>(setter + generarReporte())" --> reportes["reportes<br/>ReporteBajoStockService"]
+  reportes -- "importa InventarioService<br/>(constructor + productosBajoStockMinimo())" --> inventario
+```
+
+`ArquitecturaPaquetesTest` lo detecta (`mvn test -Dtest=ArquitecturaPaquetesTest`, salida recortada):
+
+```
+[ERROR] Tests run: 1, Failures: 1, Errors: 0, Skipped: 0
+Architecture Violation [Priority: MEDIUM] - Rule 'slices matching 'com.universidad.refactoringu11.(*)..' should be free of cycles' was violated (1 times):
+Cycle detected: Slice inventario ->
+                Slice reportes ->
+                Slice inventario
+  1. Dependencies of Slice inventario
+    - Field <...inventario.InventarioService.reporteBajoStockService> has type <...reportes.ReporteBajoStockService>
+    - Method <...inventario.InventarioService.setReporteBajoStockService(...reportes.ReporteBajoStockService)> has parameter of type <...reportes.ReporteBajoStockService>
+    - Method <...inventario.InventarioService.alertarBajoStock(...)> calls method <...reportes.ReporteBajoStockService.generarReporte()>
+  2. Dependencies of Slice reportes
+    - Constructor <...reportes.ReporteBajoStockService.<init>(...inventario.InventarioService)> has parameter of type <...inventario.InventarioService>
+    - Method <...reportes.ReporteBajoStockService.generarReporte()> calls method <...inventario.InventarioService.productosBajoStockMinimo()>
+    ...
+```
+
+Mientras tanto, las pruebas de negocio de la Parte 1 siguen en verde (`InventarioServiceTest` 10/10, `ClasificadorProductoTest` 4/4, `EtiquetadoProductoTest` 4/4). Esa es la evidencia de que el problema es de arquitectura y no de comportamiento: un code smell no es un bug.
+
+### Un segundo ciclo: el de los beans de Spring
+
+Al integrar el módulo, `RefactoringU11ApplicationTests.contextLoads` falló con `BeanCurrentlyInCreationException`: `inventarioService` pedía por setter a `reporteBajoStockService`, que pedía por constructor a `inventarioService`, que seguía en creación. Desde la versión 2.6, Spring Boot prohíbe las referencias circulares entre beans. Este ciclo es de **objetos en tiempo de ejecución**, no de paquetes, y sigue existiendo después de invertir la dependencia de paquetes, porque el reporte necesita al inventario y el inventario necesita al notificador. Se resolvió con `@Lazy` en el parámetro del constructor de `ReporteBajoStockService`: Spring inyecta un proxy diferido y el ciclo de creación desaparece sin cambiar el comportamiento.
