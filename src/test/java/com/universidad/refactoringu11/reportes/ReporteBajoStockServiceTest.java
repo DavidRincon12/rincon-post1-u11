@@ -1,12 +1,14 @@
 package com.universidad.refactoringu11.reportes;
 
 import com.universidad.refactoringu11.inventario.InventarioService;
+import com.universidad.refactoringu11.inventario.NotificadorBajoStock;
 import com.universidad.refactoringu11.inventario.Producto;
 import com.universidad.refactoringu11.inventario.TipoProducto;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
 class ReporteBajoStockServiceTest {
 
@@ -34,5 +36,22 @@ class ReporteBajoStockServiceTest {
                 Reporte de bajo stock:
                 - Clean Code: stock 3, minimo 5
                 - Cafe: stock 0, minimo 4""", reporte.generarReporte());
+    }
+
+    @Test
+    void notificar_registraLaAlertaEnElProximoReporte() {
+        Producto libro = new Producto(1L, "Clean Code", TipoProducto.LIBRO, 45.0, 3, 5);
+        inventario.agregarProducto(libro);
+        reporte.notificar(libro, 12);
+        assertEquals("""
+                Reporte de bajo stock:
+                - Clean Code: stock 3, minimo 5
+                Alertas de reorden:
+                - Clean Code: reordenar 12 unidades""", reporte.generarReporte());
+    }
+
+    @Test
+    void reporteBajoStock_esUnNotificadorBajoStock() {
+        assertInstanceOf(NotificadorBajoStock.class, reporte);
     }
 }
